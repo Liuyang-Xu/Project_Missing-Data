@@ -1,0 +1,580 @@
+---
+title: "Final Project"
+subtitle: "Missing Data"
+author: "Liuyang Xu"
+date: "3/13/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Library
+```{r library, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(VIM)
+library(mice)
+library(mi)
+```
+
+# Introduction
+## Step 0
+**Find a suitable data set with missing observations. Ideally, it should have at least 100 observations, and at least 3-4 variables, both numerical and categorical, of which at least one numerical variable is completely observed. Decide what model you want to run, what you want to estimate, and which variable you want to predict by the rest.**\
+
+The data set I chose is called the 'earnings'. This ‘earnings’ data set comes from a national survey from 1990 and contains the women and men’s earnings and other information such as weight and education status. The original data "earnings.csv" is provided in the folder.\
+
+I chose "height", "weight", "male", "education", and "earn" from the data set for my model of interest and called this subset as "earnings". This data set contains 5 variables and 1787 observations in total. The "height", "weight", "education", and "earn" are numerical variables and "male" is a categorical variable.\
+
+After reading the data, it is stored in "earnings_original" and contains no missing value. I use ampute() from mice package to create missingness with the following command:\
+```{r Step 0.1 load the data, message=FALSE}
+set.seed(1234)
+# read and modify the data
+earnings_original <- read_csv("earnings.csv") %>% 
+  select(height, weight, male, education, earn) %>% 
+  na.omit()
+```
+```{r Step 0.2 create missingness}
+# create enough missing value
+ans.miss <- ampute(earnings_original[,1:4], prop = 0.24)$amp
+earnings <- cbind(ans.miss[, 1:4],earnings_original$earn)
+colnames(earnings)[5] = "earn"
+
+knitr::kable(head(earnings)) # present the head of the data
+```
+\
+The table above shows the head of the data. The numerical variable "earn" is completely observed.\
+
+I want to do a linear regression with the data and to find the relationship between the earnings ‘earn’ and the gender ‘male’, ‘height’, ‘weight’, and education status ‘education’. The expected estimated equation is
+$$earn = b_0 + b_1\times height + b_2\times weight + b_3\times male + b_4\times education$$
+
+# Main Part
+
+## Step 1
+
+**Provide some plots and summary statistics, like percent missing per variable, percent complete cases, and so on**\
+
+The summary of the data set "earnings" is shown below.\
+```{r Step 1.1}
+summary(earnings)
+```
+\
+Now let's check the missing percent of the dataset.\
+```{r Step 1.2}
+# What percent of cases is incomplete
+missing_percent.total <- 1-sum(complete.cases(earnings))/nrow(earnings)
+missing_percent.total
+
+missing_percent.each <- colMeans(apply(earnings, 2, is.na))
+missing_percent.each
+
+# What percent of cases is complete
+notmissing_percent.total <- sum(complete.cases(earnings))/nrow(earnings)
+notmissing_percent.total
+
+notmissing_percent.each <- 1-colMeans(apply(earnings, 2, is.na))
+notmissing_percent.each
+```
+\
+There are 24.90207% of the data missing in the data set. Specifically, there are 5.819810% height data missing, 5.987689% weight data missing, 6.155568% gender data missing, and 6.939004% education status missing.\
+Relatively, there are 75.09793% of the complete data in the data set. Specifically, there are 94.18019% complete height data, 94.01231% complete weight data, 93.84443% complete gender data, and 93.06100% complete education status data.\
+
+Now let's show the histogram of these 4 variables.\
+```{r Step 1.3}
+par(mfrow=c(2,2))
+xlabnames <- c("height", "weight", "male", "education")
+for (i in 1:4) {
+  # Plot "original", "observed",and "missing"
+  hist(as.matrix(earnings_original)[ , i], 
+       col = "white", border = "black", main = "", xlab = xlabnames[i])
+  hist(as.matrix(earnings_original)[!is.na(earnings[, i]), i], 
+       col = "white", border = "blue", add = TRUE)
+  hist(as.matrix(earnings_original)[is.na(earnings[, i]), i], 
+       col = "white", border = "red", add = TRUE)
+}
+```
+\
+Each black histogram shows what the original data distribution looks like. The blue histograms represent the complete cases and the red ones represent the missing part.\
+
+**After each of the following tasks, you need to implement the analysis you have in mind and report the results/estimates.**\
+
+## Step 2 
+**Listwise deletion**\
+This method is also called the complete cases method. It removes all observations from the dataset that have any missing values.\
+```{r Step 2}
+set.seed(1234)
+# Listwise deletion
+earnings.listwise <- na.omit(earnings)
+
+# fit the regression
+fit2 <- lm(earn ~ height + weight + male + education, data = earnings.listwise)
+summary(fit2)
+```
+\
+The summary of estimates and SE are presented in the summary table above.\
+So the estimated equation after listwise deletion method is
+$$earn = -37207.86789 + 329.91661 height + 11.34224 weight + 10131.92932 male + 2302.30684 education$$
+
+## Step 3 
+**Mean/mode imputation**\
+For numerical variables, the mean imputation method in all missing values for a given variable with the mean of the observed values for that variable.\
+For categorical variables, the mode imputation method uses the value of variable's mode to impute the missing data.\
+```{r Step 3}
+set.seed(1234)
+earnings.mean_mode <- earnings # store the earnings to the earnings.mean_mode
+
+# For each numerical variable which has missing values perform mean imputation
+mean.imp <- function (a) {
+  missing <- is.na(a)
+  a.obs <- a[!missing]
+  imputed <- a
+  imputed[missing] <- mean(a.obs) # Output the imputed vector
+  return(imputed)
+}
+
+earnings.mean_mode$height <- mean.imp(earnings.mean_mode$height) # height 
+earnings.mean_mode$weight <- mean.imp(earnings.mean_mode$weight) # weight 
+earnings.mean_mode$education <- mean.imp(earnings.mean_mode$education) # education
+
+
+# For each categorical variable which has missing values perform mode imputation
+mode <- function(x) {
+  ta = table(x)
+  tam = max(ta)
+  if (all(ta == tam))
+    mod = NA
+  else
+    mod = names(ta)[ta == tam]
+  return(mod)
+}
+
+mode.imp <- function (a) {
+  missing <- is.na(a)
+  a.obs <- a[!missing]
+  imputed <- a
+  imputed[missing] <- mode(a.obs) # Output the imputed vector
+  return (imputed)
+}
+
+earnings.mean_mode$male <- mode.imp(earnings.mean_mode$male) # male
+
+
+# fit the regression
+fit3 <- lm(earn ~ height + weight + male + education, data = earnings.mean_mode)
+summary(fit3)
+```
+\
+The summary of estimates and SE are presented in the summary table above.\
+So the estimated equation after mean/mode imputation method is
+$$earn = -62636.11 + 654.53 height + 13.37 weight + 9006.76 male + 2662.07 education$$
+
+## Step 4 
+**Random imputation**\
+The random imputation randomly picks observed value from the data and imputes the value to the missing part.\
+```{r Step 4}
+set.seed(1234)
+earnings.random <- earnings # store the earnings to the earnings.random
+
+random.imp <- function (a)
+{
+  missing <- is.na(a)
+  n.missing <- sum(missing)
+  a.obs <- a[!missing]
+  imputed <- a
+  imputed[missing] <- sample (a.obs, n.missing, replace=TRUE)
+  return (imputed)
+}
+
+earnings.random$height <- random.imp(earnings.random$height) # height 
+earnings.random$weight <- random.imp(earnings.random$weight) # weight 
+earnings.random$education <- random.imp(earnings.random$education) # education
+earnings.random$male <- random.imp(earnings.random$male) # male
+
+# fit the regression
+fit4 <- lm(earn ~ height + weight + male + education, data = earnings.random)
+summary(fit4)
+```
+\
+The summary of estimates and SE are presented in the summary table above.\
+So the estimated equation after mean/mode imputation method is
+$$earn = -53671.668 + 574.446 height + 6.029 weight + 9280.720 male + 2449.321 education$$
+
+## Step 5 
+**LVCF (if applicable to your data)**\
+Since the earnings data isn't a longitudinal data. This method doesn't seem to be applicable to the data.
+
+## Step 6 
+**Hotdecking (nearest neighbor) with VIM package**\
+The hotdecking method replaces missing values using other values found in the dataset. For each person with a missing value on variable Y, find another person who has all the same values (or close to the same values) on observed variables X1, X2, X3..., and use that person’s Y value.\
+```{r Step 6}
+set.seed(1234)
+
+earnings.hotdecking <- earnings # store the earnings to the earnings.hotdecking
+
+earnings.hotdecking <- hotdeck(earnings.hotdecking)[,1:5]
+
+# fit the regression
+fit6 <- lm(earn ~ height + weight + male + education, data = earnings.hotdecking)
+summary(fit6)
+```
+\
+The summary of estimates and SE are presented in the summary table above.\
+So the estimated equation after mean/mode imputation method is
+$$earn = -53600.65 + 548.14 height + 14.19 weight + 9314.87 male + 2476.79 education$$
+
+## Step 7 
+**Regression imputation**\
+**Note you might have to use logistic or multinomial models, depending on what type of variable you impute values for.**\
+Within the complete cases $X_obs$, build a model that predicts the values Y. And then use this model within the cases with missing data $X_mis$ to predict (impute) Y.\
+```{r Step 7}
+set.seed(1234)
+
+earnings.regression <- earnings # store the earnings to the earnings.hotdecking
+
+# linear regression on numerical variables
+# height
+earnings_height <- earnings.regression %>% 
+  select(height, earn)
+Ry <- as.numeric(!is.na(earnings_height$height))
+data.cc <- earnings_height[Ry == 1,]
+data.dropped <- earnings_height[Ry == 0,]
+reg <- lm(height ~ earn, data = data.frame(data.cc))
+y.imp <- predict(reg, newdata = data.frame(data.dropped))
+earnings_height$height[Ry == 0] <- y.imp
+
+# weight
+earnings_weight <- earnings.regression %>% 
+  select(weight, earn)
+Ry <- as.numeric(!is.na(earnings_weight$weight))
+data.cc <- earnings_weight[Ry == 1,]
+data.dropped <- earnings_weight[Ry == 0,]
+reg <- lm(weight ~ earn, data = data.frame(data.cc))
+y.imp <- predict(reg, newdata = data.frame(data.dropped))
+earnings_weight$weight[Ry == 0] <- y.imp
+
+# education
+earnings_education <- earnings.regression %>% 
+  select(education, earn)
+Ry <- as.numeric(!is.na(earnings_education$education))
+data.cc <- earnings_education[Ry == 1,]
+data.dropped <- earnings_education[Ry == 0,]
+reg <- lm(education ~ earn, data = data.frame(data.cc))
+y.imp <- predict(reg, newdata = data.frame(data.dropped))
+earnings_education$education[Ry == 0] <- y.imp
+
+# logistic regression on binary vairable
+# male
+earnings_male <- earnings.regression %>% 
+  select(male, earn)
+Ry <- as.numeric(!is.na(earnings_male$male))
+data.cc <- earnings_male[Ry == 1,]
+data.dropped <- earnings_male[Ry == 0,]
+
+mylogit <- glm(male ~ earn, data = data.cc, family = "binomial")
+y.imp <- predict(mylogit, newdata = data.dropped, type = "response")
+earnings_male$male[Ry == 0] <- round(y.imp,0)
+
+
+earnings.regression <- data.frame(cbind(height = earnings_height$height,
+                            weight = earnings_weight$weight,
+                            male = earnings_male$male,
+                            education = earnings_education$education,
+                            earn = earnings.regression$earn))
+
+# fit the regression
+fit7 <- lm(earn ~ height + weight + male + education, data = earnings.regression)
+summary(fit7)
+```
+\
+The summary of estimates and SE are presented in the summary table above.\
+So the estimated equation after mean/mode imputation method is
+$$earn = -56558.50 + 535.70 height + 13.99 weight + 11099.40 male + 2724.20 education$$
+
+## Step 8 
+**Regression imputation with noise on all variables (numerical, dichotomous and multinomial).**\
+This method is basically like the method in step 7 but also add noises when predicting the missing values.\
+```{r Step 8}
+set.seed(1234)
+
+earnings.regression_with_noise <- earnings # store the earnings to the earnings.hotdecking
+
+# linear regression on numerical variables
+# height
+earnings_height <- earnings.regression_with_noise %>% 
+  select(height, earn)
+Ry <- as.numeric(!is.na(earnings_height$height))
+data.cc <- earnings_height[Ry == 1,]
+data.dropped <- earnings_height[Ry == 0,]
+reg <- lm(height ~ earn, data = data.frame(data.cc))
+y.imp <- predict(reg, newdata = data.frame(data.dropped))
+y.imp <- y.imp + rnorm(length(y.imp), 0, summary(reg)$sigma)# noise
+earnings_height$height[Ry == 0] <- y.imp
+
+# weight
+earnings_weight <- earnings.regression_with_noise %>% 
+  select(weight, earn)
+Ry <- as.numeric(!is.na(earnings_weight$weight))
+data.cc <- earnings_weight[Ry == 1,]
+data.dropped <- earnings_weight[Ry == 0,]
+reg <- lm(weight ~ earn, data = data.frame(data.cc))
+y.imp <- predict(reg, newdata = data.frame(data.dropped))
+y.imp <- y.imp + rnorm(length(y.imp), 0, summary(reg)$sigma) # noise
+earnings_weight$weight[Ry == 0] <- y.imp
+
+# education
+earnings_education <- earnings.regression_with_noise %>% 
+  select(education, earn)
+Ry <- as.numeric(!is.na(earnings_education$education))
+data.cc <- earnings_education[Ry == 1,]
+data.dropped <- earnings_education[Ry == 0,]
+reg <- lm(education ~ earn, data = data.frame(data.cc))
+y.imp <- predict(reg, newdata = data.frame(data.dropped))
+y.imp <- y.imp + rnorm(length(y.imp), 0, summary(reg)$sigma) # noise
+earnings_education$education[Ry == 0] <- y.imp
+
+# logistic regression on binary variable
+# male
+earnings_male <- earnings.regression_with_noise %>% 
+  select(male, earn)
+Ry <- as.numeric(!is.na(earnings_male$male))
+data.cc <- earnings_male[Ry == 1,]
+data.dropped <- earnings_male[Ry == 0,]
+
+mylogit <- glm(male ~ earn, data = data.cc, family = "binomial")
+y.imp <- predict(mylogit, newdata = data.dropped, type = "response")
+earnings_male$male[Ry == 0] <- rbinom(sum(Ry == 0), 1, y.imp)
+
+
+earnings.regression_with_noise <- data.frame(cbind(height = earnings_height$height,
+                            weight = earnings_weight$weight,
+                            male = earnings_male$male,
+                            education = earnings_education$education,
+                            earn = earnings.regression_with_noise$earn))
+
+# fit the regression
+fit8 <- lm(earn ~ height + weight + male + education, data = earnings.regression_with_noise)
+summary(fit8)
+```
+\
+The summary of estimates and SE are presented in the summary table above.\
+So the estimated equation after mean/mode imputation method is
+$$earn = -55292.61 + 526.32 height + 24.95 weight + 9675.52 male + 2576.59 education$$
+
+
+**Multiple imputation with either mice OR mi package**\
+
+## Step 9 
+**Load your data into the package. Obtain summary, and graphs of the data and missing patterns.**\
+This is the summary of the data.\
+```{r Step 9.1}
+# summary of the data
+summary(earnings)
+```
+\
+Using the flux() function to obtain more detailed summary statistics per variable. The summary table is shown below.\
+```{r Step 9.2}
+# More detailed summary statistics per variable
+fluxsummary <- flux(earnings)
+knitr::kable(fluxsummary)
+```
+\
+The histograms of the 4 variables with missing data has already been presented in Step 1. So let's take a look at other information graph of the data.\
+```{R Step 9.3}
+# graphs of the data
+fluxplot(earnings)
+```
+\
+Then check the missing patterns\
+```{r Step 9.4}
+earnings.mice_mi <- missing_data.frame(earnings) # store the earnings as the missing data frame
+
+md.pattern(earnings.mice_mi, rotate.names = T) # check the pattern
+
+# look at the patterns numerically
+tabulate(earnings.mice_mi@patterns)
+levels(earnings.mice_mi@patterns) 
+```
+\
+So there are five missingness patterns. 1342 cases had "nothing" missingness pattern, 124 cases had "education" missingness pattern, 104 cases had "height" missingness pattern, 110 cases had "male" missingness pattern, 107 cases had "weight" missingness pattern.
+
+## Step 10 
+**Check your data types and methods and make changes if necessary.**\
+The data types of "height", "weight", "education",and "earn" are numerical and "male" is a binary variable.\
+```{r Step 10}
+show(earnings.mice_mi)
+```
+\
+According to the table, there is no need to make changes.
+
+## Step 11 
+**Run the mi/mice command and check convergence by traceplots.**\
+First, run the mi command.\
+```{r Step 11.1, message=FALSE}
+# run the mi command
+imp.earnings <- mi(earnings.mice_mi, seed = 1, parallel = F)
+```
+\
+Then, check the convergence.\
+```{r Step 11.2}
+converged <- mi2BUGS(imp.earnings)
+
+mean_height = converged[, , 1]
+mean_weight = converged[, , 2]
+mean_male = converged[, , 3]
+mean_education = converged[, , 4]
+
+ts.plot(mean_height[,1], col=1)
+lines(mean_height[,2], col= 2)
+lines(mean_height[,3], col= 3)
+lines(mean_height[,4], col= 4)
+
+ts.plot(mean_weight[,1], col=1)
+lines(mean_weight[,2], col= 2)
+lines(mean_weight[,3], col= 3)
+lines(mean_weight[,4], col= 4)
+
+ts.plot(mean_male[,1], col=1)
+lines(mean_male[,2], col= 2)
+lines(mean_male[,3], col= 3)
+lines(mean_male[,4], col= 4)
+
+ts.plot(mean_education[,1], col=1)
+lines(mean_education[,2], col= 2)
+lines(mean_education[,3], col= 3)
+lines(mean_education[,4], col= 4)
+```
+
+## Step 12 
+**Check r-hats**\
+The r-hats are shown in the table below.\
+```{r Step 12}
+r_hats <- Rhats(imp.earnings)
+r_hats <- as.data.frame(r_hats)
+knitr::kable(r_hats)
+```
+
+## Step 13 
+**Increase number of imputations if necessary**\
+In this step, I change the iteration times to 50, while the previous defaulting is 30.\
+```{r Step 13, message=FALSE}
+imp.earnings <- mi(earnings.mice_mi, n.iter = 50, seed = 1, parallel = F)
+```
+
+## Step 14 
+**Plot some diagnostics**\
+```{r Step 14}
+plot(imp.earnings)
+```
+\
+From the plot, we can see the imputation for education isn't ideal(from the picture of education in the middle) and the distribution of "height", "weight" and "education" are still a bit different from the observed data. So we need step 15.
+
+## Step 15
+**Change imputation models if necessary, and/or number of chains.**\
+Change the "education" type to "positive" and change the imputation method for "height", "weight", and "education" to "pmm".\
+```{r Step 15.1, message=FALSE}
+set.seed(1234)
+
+earnings.mice_mi <- change(earnings.mice_mi, y = "education", 
+                           what = "type", to = "pos")
+earnings.mice_mi <- change(earnings.mice_mi , y = c("height", "weight", "education"), 
+                           what = "imputation_method", to = "pmm")
+imp.earnings <- mi(earnings.mice_mi, n.chains = 5, n.iter = 50, seed = 1, parallel = F)
+```
+\
+Now let's plot the diagnostics again.\
+```{r Step 15.2}
+plot(imp.earnings)
+```
+\
+The imputation for education is much better now. And the distributions of "height", "weight" and "education" are more similar(similar peaks) to the observed data distribution.
+
+## Step 16 
+**Run pooled analysis**
+```{r Step 16}
+set.seed(1234)
+fit9 = mi::pool(earn ~ height + weight + male + education, data=imp.earnings)
+display(fit9)
+```
+\
+The summary of estimates and SE are presented in the summary table above.\
+So the estimated equation after using mi is
+$$earn = -44261.84 + 375.48 height + 11.37 weight + 11246.79 male + 2609.74 education$$
+
+# Combined summary of results
+## Step 17 
+**Prepare a table with results from all imputation methods**\
+```{r Step 17.1}
+coefs <- matrix(NA, nrow = 7, ncol = 5)
+ses <- matrix(NA, nrow = 7, ncol = 5)
+
+colnames(coefs) <- c("Intercept Est", "height Est", 
+                     "weight Est", "male Est", "education Est")
+rownames(coefs) <- c("listwise", "mean/mode", "random", "hotdecking", 
+                     "regression", "reg with noise", "mi")
+colnames(ses) <- c("Intercept SE", "height SE", 
+                   "weight SE", "male SE", "education SE")
+rownames(ses) <- c("listwise", "mean/mode", "random", "hotdecking", 
+                   "regression", "reg with noise", "mi")
+
+coefs[1, ] <- summary(fit2)$coefficients[1:5,1]
+ses[1, ] <- summary(fit2)$coefficients[1:5,2]
+
+coefs[2, ] <- summary(fit3)$coefficients[1:5,1]
+ses[2, ] <- summary(fit3)$coefficients[1:5,2]
+
+coefs[3, ] <- summary(fit4)$coefficients[1:5,1]
+ses[3, ] <- summary(fit4)$coefficients[1:5,2]
+
+coefs[4, ] <- summary(fit6)$coefficients[1:5,1]
+ses[4, ] <- summary(fit6)$coefficients[1:5,2]
+
+coefs[5, ] <- summary(fit7)$coefficients[1:5,1]
+ses[5, ] <- summary(fit7)$coefficients[1:5,2]
+
+coefs[6, ] <- summary(fit8)$coefficients[1:5,1]
+ses[6, ] <- summary(fit8)$coefficients[1:5,2]
+
+coefs[7, ] <- summary(fit9)$coefficients[1:5,1]
+ses[7, ] <- summary(fit9)$coefficients[1:5,2]
+
+one_final_table <- t(cbind(coefs, ses))
+
+knitr::kable(one_final_table)
+```
+The table above shows the coefficient and SE result for each methods used in this project.\
+Each row corresponds to the estimates of the parameters along with SE of each imputation method.
+
+# Discussion
+## Step 18 
+**Discuss and compare to original data in terms of average percent change in coefficients and SE**
+```{r Step 18}
+# original data fit the regression
+fit1 <- lm(earn ~ height + weight + male + education, data = earnings_original)
+summaryfit1 <- summary(fit1)
+summaryfit1
+
+ave_change.coef <- rep(NA, 7)
+ave_change.se <- rep(NA, 7)
+
+for (i in 1:7){
+  # average percent change in coefficients
+  ave_change.coef[i] <- mean(abs(summaryfit1$coefficients[1:5,1] - coefs[i, ])
+                             /abs(summaryfit1$coefficients[1:5,1]))
+  
+  # average percent change in SE
+  ave_change.se[i] <- mean(abs(summaryfit1$coefficients[1:5,2] - ses[i, ])
+                           /abs(summaryfit1$coefficients[1:5,2]))
+}
+
+ave_change <- rbind(ave_change.coef,ave_change.se)
+colnames(ave_change) <- c("listwise", "mean/mode", "random", "hotdecking", 
+                          "regression", "reg with noise", "mi")
+rownames(ave_change) <- c("coefficients ave change","se ave change")
+
+knitr::kable(ave_change)
+```
+\
+So the estimated equation of the original data is
+$$earn = -39967.17 + 305.40 height + 16.32 weight + 11375.48 male + 2570.64 education$$
+\
+The table shows the average percent change in coefficients and SE and also shows that the method using mi package gives the smallest change both in coefficients(13.33729%) and SE(3.61047%) which may indicates that this is the best methods for imputing missing data for this data set.
